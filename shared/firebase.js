@@ -94,22 +94,19 @@ function randomToken(len = 24) {
 export async function createRoom(code) {
   const doorCode = randomCode();
   const joinToken = randomToken();
-  await set(roomRef(code), {
-    code: doorCode,
-    joinToken,
-    status: "waiting",
-    duration: 120,
-    players: {
-      blind: { present: false },
-      mute: { present: false },
-      deaf: { present: false },
-    },
-    symbols: { current: null },
-    doorAttempt: { guess: "", ts: 0, result: "pending" },
+  await set(roomRef(code, "code"), doorCode);
+  await set(roomRef(code, "joinToken"), joinToken);
+  await set(roomRef(code, "status"), "waiting");
+  await set(roomRef(code, "duration"), 120);
+  await set(roomRef(code, "players"), {
+    blind: { present: false },
+    mute: { present: false },
+    deaf: { present: false },
   });
+  await set(roomRef(code, "symbols"), { current: null });
+  await set(roomRef(code, "doorAttempt"), { guess: "", ts: 0, result: "pending" });
   return { doorCode, joinToken };
 }
-
 /**
  * Player joins a role slot. Requires the joinToken that came from the invite
  * link — the DB rules reject writes to /rooms/{code}/players/* unless the
