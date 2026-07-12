@@ -84,7 +84,7 @@
 </div>
 
 <script type="module">
-  import { createRoom, joinAsRole, roomRef, onValue, get, startGame } from "./shared/firebase.js";
+  import { createRoom, joinAsRole, roomRef, onValue, get, startGame, authReady } from "./shared/firebase.js";
 
   let watchedRoom = null;
   function watchPresence(code) {
@@ -131,13 +131,23 @@
     statusEl.className = isErr ? "err" : "";
   }
 
+  let currentJoinToken = null;
+
+  // If arriving via an invite link (?room=1234&t=...), pre-fill and skip typing the token.
+  const urlParams = new URLSearchParams(location.search);
+  if (urlParams.get("room")) roomInput.value = urlParams.get("room");
+  if (urlParams.get("t")) currentJoinToken = urlParams.get("t");
+
   document.getElementById("hostBtn").addEventListener("click", async () => {
+    await authReady;
     const code = String(Math.floor(1000 + Math.random() * 9000));
     roomInput.value = code;
     updateEnterState();
     try {
-      const doorCode = await createRoom(code);
-      setStatus(`Room ${code} created. Share this code with the other two players. (Door code randomized: hidden from host, only the mute player's client will reveal it.)`);
+      const { joinToken } = await createRoom(code);
+      currentJoinToken = joinToken;
+      const inviteUrl = `${location.origin}${location.pathname}?room=${code}&t=${joinToken}`;
+      setStatus(`Room created. Don't share the room code alone — send this full invite link to the other two players (it's what makes the room guess-proof): ${inviteUrl}`);
       watchPresence(code);
     } catch (e) {
       setStatus("Couldn't reach Firebase — check shared/firebase.js config. " + e.message, true);
@@ -145,13 +155,17 @@
   });
 
   document.getElementById("joinExistingBtn").addEventListener("click", () => {
-    roomInput.focus();
-    setStatus("Enter the 4-digit room code your host shared.");
+    setStatus("Paste the full invite link the host sent you (not just the 4-digit code) — open it directly, or open this page and it'll pick up the ?room= and ?t= from the URL automatically.");
   });
 
   document.getElementById("enterBtn").addEventListener("click", async () => {
+    await authReady;
     const code = roomInput.value;
     if (!selectedRole || code.length !== 4) return;
+    if (!currentJoinToken) {
+      setStatus("Missing invite token — open the full link the host shared, don't just type the room code.", true);
+      return;
+    }
     try {
       const snap = await get(roomRef(code));
       if (!snap.exists()) {
@@ -159,11 +173,11 @@
         return;
       }
       const uid = "duck-" + Math.random().toString(36).slice(2, 8);
-      await joinAsRole(code, selectedRole, uid);
+      await joinAsRole(code, selectedRole, uid, currentJoinToken);
       sessionStorage.setItem("ducktape_uid", uid);
       sessionStorage.setItem("ducktape_room", code);
       watchPresence(code);
-      window.location.href = `./${selectedRole}.html?room=${code}&uid=${uid}`;
+      window.location.href = `./${selectedRole}.html?room=${code}&uid=${uid}&t=${currentJoinToken}`;
     } catch (e) {
       setStatus("Connection error: " + e.message, true);
     }
