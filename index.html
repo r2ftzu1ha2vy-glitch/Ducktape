@@ -87,6 +87,10 @@
 <script type="module">
   import { createRoom, joinAsRole, roomRef, onValue, get, startGame, authReady } from "./shared/firebase.js";
 
+  const urlParams = new URLSearchParams(window.location.search);
+  let joinToken = urlParams.get("t") || null;
+  const urlRoom = urlParams.get("room");
+
   let selectedRole = null;
   document.querySelectorAll(".role-btn").forEach(btn => {
     btn.addEventListener("click", () => {
@@ -105,6 +109,11 @@
 
   function updateEnterState() {
     document.getElementById("enterBtn").disabled = !(selectedRole && roomInput.value.length === 4);
+  }
+
+  if (urlRoom) {
+    roomInput.value = urlRoom.replace(/[^0-9]/g, "").slice(0, 4);
+    updateEnterState();
   }
 
   const statusEl = document.getElementById("status");
@@ -144,8 +153,10 @@
     roomInput.value = code;
     updateEnterState();
     try {
-      await createRoom(code);
-      setStatus(`Room ${code} created. Share this code with the other two players.`);
+      const result = await createRoom(code);
+      joinToken = result.joinToken;
+      const inviteUrl = `${window.location.origin}${window.location.pathname}?room=${code}&t=${joinToken}`;
+      setStatus(`Room ${code} created. Share this link with the other two players: ${inviteUrl}`);
       watchPresence(code);
     } catch (e) {
       setStatus("Couldn't reach Firebase — check shared/firebase.js config. " + e.message, true);
@@ -167,8 +178,12 @@
         setStatus("No room found with that code. Ask the host to create it first.", true);
         return;
       }
+      if (!joinToken) {
+        setStatus("Missing invite token — use the link the host shared, not just the room code.", true);
+        return;
+      }
       const uid = "duck-" + Math.random().toString(36).slice(2, 8);
-      await joinAsRole(code, selectedRole, uid);
+      await joinAsRole(code, selectedRole, uid, joinToken);
       sessionStorage.setItem("ducktape_uid", uid);
       sessionStorage.setItem("ducktape_room", code);
       watchPresence(code);
