@@ -21,10 +21,10 @@ import {
 } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-database.js";
 
 const firebaseConfig = {
-  apiKey: "YOUR_API_KEY",
-  authDomain: "YOUR_PROJECT.firebaseapp.com",
-  databaseURL: "https://YOUR_PROJECT-default-rtdb.firebaseio.com",
-  projectId: "YOUR_PROJECT",
+  apiKey: "AIzaSyD6Im0hdbp_tfEu-d2sMLfvmf52W08pKWs",
+  authDomain: "ducktape-8c067.firebaseapp.com",
+  databaseURL: "https://ducktape-8c067-default-rtdb.firebaseio.com/",
+  projectId: "ducktape-8c067",
 };
 
 const app = initializeApp(firebaseConfig);
