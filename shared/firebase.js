@@ -64,6 +64,8 @@ export {
 //     set by the mute player selecting which code-digit they're pointing at.
 //     shape: { position: 0-3, value: "0".."9", ts }
 // /rooms/{code}/doorAttempt     -> { guess: "1234", ts, result: "pending"|"correct"|"wrong" }
+// /rooms/{code}/chatMessage     -> { text: string, ts } — deaf's one-way question to mute
+// /rooms/{code}/muteJump        -> { ts } — bumped every time mute jumps (deaf's yes signal)
 // ---------------------------------------------------------------------------
 
 export function roomRef(code, ...path) {
@@ -102,6 +104,8 @@ export async function createRoom(code) {
     deaf: { present: false },
   });
   await set(roomRef(code, "symbols"), { current: null });
+  await set(roomRef(code, "chatMessage"), { text: "", ts: 0 });
+  await set(roomRef(code, "muteJump"), { ts: 0 });
   await set(roomRef(code, "doorAttempt"), { guess: "", ts: 0, result: "pending" });
   return doorCode;
 }
@@ -129,6 +133,16 @@ export async function broadcastSymbol(code, shape, worldX, worldZ) {
   await set(roomRef(code, "symbols", "current"), {
     shape, worldX, worldZ, ts: Date.now(),
   });
+}
+
+/** Deaf sends a one-way text question to mute, visible only through their shared window. */
+export async function sendChatMessage(code, text) {
+  await set(roomRef(code, "chatMessage"), { text, ts: Date.now() });
+}
+
+/** Mute signals "yes" by jumping — bumps a timestamp deaf's client watches to trigger the jump animation. */
+export async function signalJump(code) {
+  await set(roomRef(code, "muteJump"), { ts: Date.now() });
 }
 
 const MAX_DOOR_ATTEMPTS = 5;
