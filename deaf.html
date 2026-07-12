@@ -15,9 +15,9 @@
   #timer{font-size:24px;font-weight:800;font-variant-numeric:tabular-nums;}
   #timer.low{color:var(--alert);}
   #role{font-weight:700;letter-spacing:1px;font-size:14px;}
-  #stage{position:absolute;top:56px;left:0;right:0;bottom:120px;}
+  #stage{position:absolute;top:56px;left:0;right:0;bottom:170px;}
   canvas{display:block;width:100%;height:100%;}
-  #hud{position:fixed;bottom:0;left:0;right:0;height:120px;background:rgba(10,25,28,.9);
+  #hud{position:fixed;bottom:0;left:0;right:0;height:170px;background:rgba(10,25,28,.9);
     border-top:2px solid var(--gold);padding:10px 16px;z-index:20;display:flex;flex-direction:column;gap:6px;}
   #hud h4{margin:0;font-size:11px;text-transform:uppercase;letter-spacing:1.5px;opacity:.65;}
   #symLog{font-size:13px;line-height:1.4;max-height:70px;overflow:auto;}
@@ -40,8 +40,12 @@
 <div id="stage"><canvas id="cv"></canvas></div>
 
 <div id="hud">
-  <h4>Drag to look, WASD to walk. You see shapes the mute duck places — call out which shape and roughly where, so blind duck can find it. Only mute knows what each shape's digit is.</h4>
+  <h4>Drag to look, WASD to walk. You see shapes the mute duck places — call out which shape and roughly where, so blind duck can find it. Only mute knows what each shape's digit is. Find the window to mute's room to ask them yes/no questions.</h4>
   <div id="symLog">No symbols placed yet.</div>
+  <div class="row" id="chatRow" style="display:flex;gap:8px;margin-top:4px;">
+    <input type="text" id="chatInput" placeholder="Ask mute: is circle 0?" style="flex:1;padding:8px 10px;border-radius:8px;border:1px solid rgba(242,193,78,.5);background:#0a1c1f;color:#eef6f3;font-size:13px;">
+    <button id="sendChatBtn" style="background:var(--gold);color:#1b2a2f;border:none;font-weight:800;padding:8px 16px;border-radius:20px;cursor:pointer;font-size:13px;">Ask</button>
+  </div>
 </div>
 
 <div id="resultOverlay">
@@ -55,7 +59,7 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/examples/js/loaders/GLTFLoader.js"></script>
 <script type="module">
-import { roomRef, onValue, update, authReady } from "./shared/firebase.js";
+import { roomRef, onValue, update, sendChatMessage, authReady } from "./shared/firebase.js";
 import { loadDuck } from "./shared/duck.js";
 import { createFirstPersonRig, hideFromOwnCamera } from "./shared/firstPerson.js";
 
@@ -83,11 +87,52 @@ floor.position.y = -0.5;
 scene.add(floor);
 
 const wallMat = new THREE.MeshStandardMaterial({ color: 0x1b3d3f, flatShading: true, roughness: 0.9 });
-[[0, 1, -5, 10, 3, 0.2], [-5, 1, 0, 0.2, 3, 10], [5, 1, 0, 0.2, 3, 10]].forEach(([x, y, z, w, h, d]) => {
+// Right wall has a window cut out (built from two slabs instead of one solid wall)
+const rightWallTop = new THREE.Mesh(new THREE.BoxGeometry(0.2, 0.8, 10), wallMat);
+rightWallTop.position.set(5, 2.1, 0);
+scene.add(rightWallTop);
+const rightWallBottom = new THREE.Mesh(new THREE.BoxGeometry(0.2, 0.8, 10), wallMat);
+rightWallBottom.position.set(5, 0.1, 0);
+scene.add(rightWallBottom);
+const rightWallLeftEdge = new THREE.Mesh(new THREE.BoxGeometry(0.2, 3, 3), wallMat);
+rightWallLeftEdge.position.set(5, 1, -3.5);
+scene.add(rightWallLeftEdge);
+const rightWallRightEdge = new THREE.Mesh(new THREE.BoxGeometry(0.2, 3, 3), wallMat);
+rightWallRightEdge.position.set(5, 1, 3.5);
+scene.add(rightWallRightEdge);
+// Window frame trim
+const frameMat = new THREE.MeshStandardMaterial({ color: 0xf2c14e, flatShading: true });
+[[5, 1.5, -1.05, 0.05, 1.4, 0.15], [5, 1.5, 1.05, 0.05, 1.4, 0.15],
+ [5, 2.1, 0, 0.05, 0.15, 2.2], [5, 0.9, 0, 0.05, 0.15, 2.2]].forEach(([x, y, z, w, h, d]) => {
+  const trim = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), frameMat);
+  trim.position.set(x, y, z);
+  scene.add(trim);
+});
+
+[[0, 1, -5, 10, 3, 0.2], [-5, 1, 0, 0.2, 3, 10]].forEach(([x, y, z, w, h, d]) => {
   const wall = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), wallMat);
   wall.position.set(x, y, z);
   scene.add(wall);
 });
+
+// Small room visible beyond the window — mute's side. Just enough geometry
+// to read as "another room", plus a duck avatar mute controls remotely.
+const muteRoomFloor = new THREE.Mesh(new THREE.BoxGeometry(4, 0.2, 3), floorMat);
+muteRoomFloor.position.set(7.5, -0.5, 0);
+scene.add(muteRoomFloor);
+const muteRoomBackWall = new THREE.Mesh(new THREE.BoxGeometry(0.2, 3, 3), wallMat);
+muteRoomBackWall.position.set(9.5, 1, 0);
+scene.add(muteRoomBackWall);
+
+let muteAvatar = new THREE.Group();
+scene.add(muteAvatar);
+loadDuck(0xffcf4a, ({ group }) => {
+  scene.remove(muteAvatar);
+  muteAvatar = group;
+  muteAvatar.position.set(7.5, 0, 0);
+  scene.add(muteAvatar);
+});
+let muteJumpT = 0; // 0..1 progress through a jump animation, 0 = idle
 
 // Visible keypad on the back wall — same physical spot Blind is feeling for.
 const keypadMat = new THREE.MeshStandardMaterial({ color: 0xf2c14e, flatShading: true });
@@ -146,6 +191,28 @@ onValue(roomRef(ROOM, "symbols", "current"), snap => {
   log.prepend(row);
 });
 
+// ---------------- Chat: deaf -> mute only, one-way ----------------
+document.getElementById("sendChatBtn").addEventListener("click", sendChat);
+document.getElementById("chatInput").addEventListener("keydown", e => {
+  if (e.key === "Enter") sendChat();
+});
+async function sendChat() {
+  const input = document.getElementById("chatInput");
+  const text = input.value.trim();
+  if (!text) return;
+  await sendChatMessage(ROOM, text);
+  input.value = "";
+}
+
+// ---------------- Mute's jump, visible through the window ----------------
+let lastJumpTs = 0;
+onValue(roomRef(ROOM, "muteJump"), snap => {
+  const data = snap.val();
+  if (!data || !data.ts || data.ts === lastJumpTs) return;
+  lastJumpTs = data.ts;
+  muteJumpT = 0.001; // kick off jump animation next frame
+});
+
 // ---------------- Timer ----------------
 const timerEl = document.getElementById("timer");
 let duration = 120, startedAt = null, status = "waiting";
@@ -189,6 +256,17 @@ function animate() {
   const state = rig.update(0.06);
   duckGroup.position.set(state.pos.x, 0, state.pos.z);
   if (rig.isMoving()) duckGroup.rotation.y = state.moveYaw;
+
+  if (muteJumpT > 0) {
+    muteJumpT += 0.04;
+    if (muteJumpT >= 1) {
+      muteJumpT = 0;
+      muteAvatar.position.y = 0;
+    } else {
+      muteAvatar.position.y = Math.sin(muteJumpT * Math.PI) * 0.8;
+    }
+  }
+
   renderer.render(scene, camera);
   requestAnimationFrame(animate);
 }
