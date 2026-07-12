@@ -125,10 +125,8 @@ export async function joinAsRole(code, role, uid, joinToken) {
 
 /** Starts the shared timer for everyone at once. */
 export async function startGame(code) {
-  await update(roomRef(code), {
-    status: "playing",
-    startedAt: serverTimestamp(),
-  });
+  await set(roomRef(code, "status"), "playing");
+  await set(roomRef(code, "startedAt"), serverTimestamp());
 }
 
 /** Deaf player draws a symbol; broadcasts to blind player's world. */
