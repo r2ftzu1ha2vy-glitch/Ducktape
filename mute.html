@@ -81,11 +81,12 @@
 </div>
 
 <script type="module">
-import { roomRef, onValue, update, broadcastSymbol } from "./shared/firebase.js";
+import { roomRef, onValue, update, broadcastSymbol, authReady } from "./shared/firebase.js";
 
 const params = new URLSearchParams(location.search);
 const ROOM = params.get("room");
 if (!ROOM) document.getElementById("log").textContent = "No room code in URL — go back to lobby.";
+await authReady;
 
 // Reveal the real randomized code to this client only.
 onValue(roomRef(ROOM, "code"), snap => {
