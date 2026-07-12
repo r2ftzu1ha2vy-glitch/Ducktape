@@ -29,6 +29,9 @@
   button#tryDoor:disabled{opacity:.3;cursor:not-allowed;}
   button#clearBtn{background:transparent;color:#fff;border:1px solid #fff;border-radius:20px;
     padding:6px 14px;font-size:12px;cursor:pointer;}
+  .numkey{width:44px;height:36px;background:transparent;color:#fff;border:1px solid #fff;
+    border-radius:6px;font-size:14px;cursor:pointer;}
+  .numkey:active{background:#fff;color:#000;}
   .row{display:flex;gap:8px;align-items:center;justify-content:center;}
   #resultOverlay{position:fixed;inset:0;z-index:50;display:none;align-items:center;justify-content:center;
     background:rgba(0,0,0,.92);}
@@ -46,12 +49,15 @@
 <div id="stage"><canvas id="cv"></canvas></div>
 
 <div id="hud">
-  <div id="cueLog">Walk near a shape to hear its cue. Build the 4-digit code from what you're told.</div>
+  <div id="cueLog">Drag to look around. WASD/arrows to walk. Find the outlined keypad on the back wall — walk near shapes along the way to hear tones.</div>
   <div class="digits">
     <div class="digit-slot" id="d0">?</div>
     <div class="digit-slot" id="d1">?</div>
     <div class="digit-slot" id="d2">?</div>
     <div class="digit-slot" id="d3">?</div>
+  </div>
+  <div class="row" id="numpad" style="flex-wrap:wrap;max-width:340px;margin:0 auto;">
+    <!-- 0-9 buttons injected by script -->
   </div>
   <div class="row">
     <button id="clearBtn">Clear</button>
@@ -77,6 +83,7 @@
 <script type="module">
 import { roomRef, onValue, get, update, attemptDoor, resolveDoorAttempt, authReady } from "./shared/firebase.js";
 import { loadDuck } from "./shared/duck.js";
+import { createFirstPersonRig, hideFromOwnCamera } from "./shared/firstPerson.js";
 
 const params = new URLSearchParams(location.search);
 const ROOM = params.get("room");
@@ -90,9 +97,7 @@ const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
 renderer.setClearColor(0x000000, 1);
 renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
 const scene = new THREE.Scene();
-const camera = new THREE.PerspectiveCamera(55, 1, 0.1, 100);
-camera.position.set(0, 4, 6);
-camera.lookAt(0, 0, 0);
+const camera = new THREE.PerspectiveCamera(70, 1, 0.1, 100);
 
 // Every object in the blind duck's world is rendered as a plain black fill mesh
 // PLUS a white wireframe/edges overlay, so they only ever perceive silhouettes.
@@ -114,6 +119,18 @@ addEdged(new THREE.BoxGeometry(10, 3, 0.2), new THREE.Vector3(0, 1, -5));
 addEdged(new THREE.BoxGeometry(0.2, 3, 10), new THREE.Vector3(-5, 1, 0));
 addEdged(new THREE.BoxGeometry(0.2, 3, 10), new THREE.Vector3(5, 1, 0));
 
+// ---------------- Keypad: white outline, black fill, fixed on the back wall ----------------
+// Gives the blind duck something concrete to navigate toward.
+const KEYPAD_POS = new THREE.Vector3(0, 1.1, -4.85);
+addEdged(new THREE.BoxGeometry(1.1, 1.4, 0.08), KEYPAD_POS);
+for (let r = 0; r < 3; r++) {
+  for (let c = 0; c < 3; c++) {
+    const kx = KEYPAD_POS.x - 0.32 + c * 0.32;
+    const ky = KEYPAD_POS.y + 0.45 - r * 0.32;
+    addEdged(new THREE.BoxGeometry(0.22, 0.22, 0.02), new THREE.Vector3(kx, ky, KEYPAD_POS.z + 0.06));
+  }
+}
+
 // The duck itself — still just an outlined silhouette in this world.
 let duckGroup = new THREE.Group();
 scene.add(duckGroup);
@@ -130,6 +147,7 @@ loadDuck(0xffffff, ({ group }) => {
     }
   });
   scene.add(duckGroup);
+  hideFromOwnCamera(camera, duckGroup);
 });
 
 function resize() {
@@ -141,11 +159,9 @@ function resize() {
 window.addEventListener("resize", resize);
 resize();
 
-// Duck position the player can move with arrow keys / on-screen drag (simple demo control)
-const duckPos = new THREE.Vector3(0, 0, 2);
-const keys = {};
-window.addEventListener("keydown", e => keys[e.key] = true);
-window.addEventListener("keyup", e => keys[e.key] = false);
+// First-person rig: drag to look, WASD/arrows to move relative to view.
+const rig = createFirstPersonRig(camera, canvas, { bounds: 4.5 });
+const duckPos = rig.state.pos;
 
 // ---------------- Symbol markers placed by the deaf player ----------------
 // Each symbol has a shape + world position; when the blind duck's position
@@ -200,14 +216,15 @@ function syncSymbol(data) {
 onValue(roomRef(ROOM, "symbols", "current"), snap => syncSymbol(snap.val()));
 
 // ---------------- Digit slots filled by walking into symbols ----------------
-// Mapping from shape -> which digit slot / value is decided by the deaf+mute
-// duo out-of-band (their gesture relay). Here, each tone the blind duck hears
-// also shows a shape-to-slot legend so they know to ask "what does circle mean?"
-// Practically: proximity triggers a tone AND advances the next empty digit slot
-// with a value derived from the shape, giving the group something concrete to
-// coordinate around without giving the blind player any visual info.
-const SHAPE_DIGIT_HINT = { circle: 1, triangle: 3, square: 7, zigzag: 9 }; // placeholder mapping for demo
+// Mute holds the only shape->digit legend (see mute.html) and never speaks it
+// aloud in-game; Blind just hears a tone per shape. The actual digit isn't
+// auto-resolved here on purpose — it's what Mute/Deaf have to relay to Blind
+// out loud. We still advance a slot on contact so there's a concrete "a digit
+// was just placed here" moment, but the value shown is "?" until Blind types
+// what their team tells them via the digit-entry buttons below.
+const SHAPE_LABEL = { circle: "circle", triangle: "triangle", square: "square", zigzag: "zigzag" };
 let filledDigits = [null, null, null, null];
+let pendingSlot = -1; // slot waiting on a verbal digit from the team
 
 function nextEmptySlot() {
   return filledDigits.findIndex(d => d === null);
@@ -223,8 +240,25 @@ function renderDigits() {
 }
 document.getElementById("clearBtn").addEventListener("click", () => {
   filledDigits = [null, null, null, null];
+  pendingSlot = -1;
   renderDigits();
 });
+
+// Numpad: Blind types the digit their team calls out after hearing a tone.
+const numpad = document.getElementById("numpad");
+for (let n = 0; n <= 9; n++) {
+  const btn = document.createElement("button");
+  btn.className = "numkey";
+  btn.textContent = n;
+  btn.addEventListener("click", () => {
+    const slot = pendingSlot !== -1 ? pendingSlot : nextEmptySlot();
+    if (slot === -1) return;
+    filledDigits[slot] = n;
+    pendingSlot = -1;
+    renderDigits();
+  });
+  numpad.appendChild(btn);
+}
 
 function checkProximity() {
   for (const [key, sym] of activeSymbols) {
@@ -235,13 +269,9 @@ function checkProximity() {
     if (dist < 0.8) {
       sym.triggered = true;
       playTone(SHAPE_TONES[sym.shape]);
-      const slot = nextEmptySlot();
-      if (slot !== -1) {
-        filledDigits[slot] = SHAPE_DIGIT_HINT[sym.shape];
-        renderDigits();
-      }
+      pendingSlot = nextEmptySlot();
       document.getElementById("cueLog").textContent =
-        `Heard a tone (${sym.shape}) — a digit was placed. Confirm with your team which digit this really is.`;
+        `Heard a tone (${SHAPE_LABEL[sym.shape]}) — ask your team what digit that shape means, then tap it below.`;
     }
   }
 }
@@ -303,16 +333,9 @@ function endGame(won) {
 
 // ---------------- Movement + render loop ----------------
 function animate() {
-  const speed = 0.06;
-  if (keys["ArrowUp"] || keys["w"]) duckPos.z -= speed;
-  if (keys["ArrowDown"] || keys["s"]) duckPos.z += speed;
-  if (keys["ArrowLeft"] || keys["a"]) duckPos.x -= speed;
-  if (keys["ArrowRight"] || keys["d"]) duckPos.x += speed;
-  duckPos.x = THREE.MathUtils.clamp(duckPos.x, -4.5, 4.5);
-  duckPos.z = THREE.MathUtils.clamp(duckPos.z, -4.5, 4.5);
-  duckGroup.position.set(duckPos.x, 0, duckPos.z);
-  camera.position.set(duckPos.x, 4, duckPos.z + 5);
-  camera.lookAt(duckPos.x, 0, duckPos.z);
+  const state = rig.update(0.06);
+  duckGroup.position.set(state.pos.x, 0, state.pos.z);
+  if (rig.isMoving()) duckGroup.rotation.y = state.moveYaw;
   checkProximity();
   renderer.render(scene, camera);
   requestAnimationFrame(animate);
