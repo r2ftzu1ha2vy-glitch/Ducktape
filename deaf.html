@@ -55,12 +55,13 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/examples/js/loaders/GLTFLoader.js"></script>
 <script type="module">
-import { roomRef, onValue, update } from "./shared/firebase.js";
+import { roomRef, onValue, update, authReady } from "./shared/firebase.js";
 import { loadDuck } from "./shared/duck.js";
 
 const params = new URLSearchParams(location.search);
 const ROOM = params.get("room");
 if (!ROOM) document.getElementById("symLog").textContent = "No room code in URL — go back to lobby.";
+await authReady;
 
 // ---------------- Full-color scene (this is the only client that sees normally) ----------------
 const canvas = document.getElementById("cv");
