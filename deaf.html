@@ -40,7 +40,7 @@
 <div id="stage"><canvas id="cv"></canvas></div>
 
 <div id="hud">
-  <h4>Symbols placed by the mute duck (relay these positions to the blind duck by any visual means outside the game)</h4>
+  <h4>Drag to look, WASD to walk. You see shapes the mute duck places — call out which shape and roughly where, so blind duck can find it. Only mute knows what each shape's digit is.</h4>
   <div id="symLog">No symbols placed yet.</div>
 </div>
 
@@ -57,6 +57,7 @@
 <script type="module">
 import { roomRef, onValue, update, authReady } from "./shared/firebase.js";
 import { loadDuck } from "./shared/duck.js";
+import { createFirstPersonRig, hideFromOwnCamera } from "./shared/firstPerson.js";
 
 const params = new URLSearchParams(location.search);
 const ROOM = params.get("room");
@@ -69,9 +70,7 @@ const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
 renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
 const scene = new THREE.Scene();
 scene.background = new THREE.Color(0x163b3f);
-const camera = new THREE.PerspectiveCamera(55, 1, 0.1, 100);
-camera.position.set(0, 6, 8);
-camera.lookAt(0, 0, 0);
+const camera = new THREE.PerspectiveCamera(70, 1, 0.1, 100);
 
 scene.add(new THREE.HemisphereLight(0xbfe9ff, 0x142b2e, 1.1));
 const dir = new THREE.DirectionalLight(0xffffff, 0.9);
@@ -90,6 +89,12 @@ const wallMat = new THREE.MeshStandardMaterial({ color: 0x1b3d3f, flatShading: t
   scene.add(wall);
 });
 
+// Visible keypad on the back wall — same physical spot Blind is feeling for.
+const keypadMat = new THREE.MeshStandardMaterial({ color: 0xf2c14e, flatShading: true });
+const keypad = new THREE.Mesh(new THREE.BoxGeometry(1.1, 1.4, 0.08), keypadMat);
+keypad.position.set(0, 1.1, -4.85);
+scene.add(keypad);
+
 let duckGroup = new THREE.Group();
 scene.add(duckGroup);
 loadDuck(0x7fd9ff, ({ group }) => {
@@ -97,6 +102,7 @@ loadDuck(0x7fd9ff, ({ group }) => {
   duckGroup = group;
   duckGroup.position.set(0, 0, 3);
   scene.add(duckGroup);
+  hideFromOwnCamera(camera, duckGroup);
 });
 
 function resize() {
@@ -107,6 +113,9 @@ function resize() {
 }
 window.addEventListener("resize", resize);
 resize();
+
+// First-person rig: drag to look, WASD/arrows to move relative to view.
+const rig = createFirstPersonRig(camera, canvas, { bounds: 4.5 });
 
 // ---------------- Live symbols placed by the mute duck ----------------
 const SHAPE_ICON = { circle: "⭕", triangle: "🔺", square: "⬛", zigzag: "⚡" };
@@ -177,6 +186,9 @@ function endGame(won) {
 }
 
 function animate() {
+  const state = rig.update(0.06);
+  duckGroup.position.set(state.pos.x, 0, state.pos.z);
+  if (rig.isMoving()) duckGroup.rotation.y = state.moveYaw;
   renderer.render(scene, camera);
   requestAnimationFrame(animate);
 }
