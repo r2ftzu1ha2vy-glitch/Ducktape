@@ -64,6 +64,10 @@
   </div>
   <div class="note">Drag to look, WASD to walk. Pick a shape below, walk to where you want it, then place — deaf duck sees it, blind duck hears a tone when they reach it. You never speak the legend aloud.</div>
 
+  <h4>Message from deaf duck (through the window)</h4>
+  <div id="chatFromDeaf" style="background:#0a1c1f;border:1px solid rgba(242,193,78,.35);border-radius:8px;padding:10px 12px;font-size:13px;min-height:18px;margin-bottom:6px;">No messages yet.</div>
+  <button id="jumpBtn" style="background:#7fd9ff;color:var(--ink);border:none;font-weight:800;padding:10px 16px;border-radius:20px;cursor:pointer;font-size:13px;width:100%;margin-bottom:14px;">Jump (= Yes)</button>
+
   <h4>Pick a shape to place at your current spot</h4>
   <div class="shape-grid" id="shapeGrid">
     <div class="shape-tile" data-shape="circle"><div class="icon">⭕</div><div class="label">Circle</div></div>
@@ -86,7 +90,7 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/examples/js/loaders/GLTFLoader.js"></script>
 <script type="module">
-import { roomRef, onValue, update, broadcastSymbol, authReady } from "./shared/firebase.js";
+import { roomRef, onValue, update, broadcastSymbol, signalJump, authReady } from "./shared/firebase.js";
 import { loadDuck } from "./shared/duck.js";
 import { createFirstPersonRig, hideFromOwnCamera } from "./shared/firstPerson.js";
 
@@ -120,10 +124,48 @@ floor.position.y = -0.5;
 scene.add(floor);
 
 const wallMat = new THREE.MeshStandardMaterial({ color: 0x1b3d3f, flatShading: true, roughness: 0.9 });
-[[0, 1, -5, 10, 3, 0.2], [-5, 1, 0, 0.2, 3, 10], [5, 1, 0, 0.2, 3, 10]].forEach(([x, y, z, w, h, d]) => {
+// Left wall has a window cut out, mirroring deaf's right-wall window, so the
+// two rooms face each other across it.
+const leftWallTop = new THREE.Mesh(new THREE.BoxGeometry(0.2, 0.8, 10), wallMat);
+leftWallTop.position.set(-5, 2.1, 0);
+scene.add(leftWallTop);
+const leftWallBottom = new THREE.Mesh(new THREE.BoxGeometry(0.2, 0.8, 10), wallMat);
+leftWallBottom.position.set(-5, 0.1, 0);
+scene.add(leftWallBottom);
+const leftWallFrontEdge = new THREE.Mesh(new THREE.BoxGeometry(0.2, 3, 3), wallMat);
+leftWallFrontEdge.position.set(-5, 1, -3.5);
+scene.add(leftWallFrontEdge);
+const leftWallBackEdge = new THREE.Mesh(new THREE.BoxGeometry(0.2, 3, 3), wallMat);
+leftWallBackEdge.position.set(-5, 1, 3.5);
+scene.add(leftWallBackEdge);
+const frameMat = new THREE.MeshStandardMaterial({ color: 0xf2c14e, flatShading: true });
+[[-5, 1.5, -1.05, 0.05, 1.4, 0.15], [-5, 1.5, 1.05, 0.05, 1.4, 0.15],
+ [-5, 2.1, 0, 0.05, 0.15, 2.2], [-5, 0.9, 0, 0.05, 0.15, 2.2]].forEach(([x, y, z, w, h, d]) => {
+  const trim = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), frameMat);
+  trim.position.set(x, y, z);
+  scene.add(trim);
+});
+
+[[0, 1, -5, 10, 3, 0.2], [5, 1, 0, 0.2, 3, 10]].forEach(([x, y, z, w, h, d]) => {
   const wall = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), wallMat);
   wall.position.set(x, y, z);
   scene.add(wall);
+});
+
+const deafRoomFloor = new THREE.Mesh(new THREE.BoxGeometry(4, 0.2, 3), floorMat);
+deafRoomFloor.position.set(-7.5, -0.5, 0);
+scene.add(deafRoomFloor);
+const deafRoomBackWall = new THREE.Mesh(new THREE.BoxGeometry(0.2, 3, 3), wallMat);
+deafRoomBackWall.position.set(-9.5, 1, 0);
+scene.add(deafRoomBackWall);
+
+let deafAvatar = new THREE.Group();
+scene.add(deafAvatar);
+loadDuck(0x7fd9ff, ({ group }) => {
+  scene.remove(deafAvatar);
+  deafAvatar = group;
+  deafAvatar.position.set(-7.5, 0, 0);
+  scene.add(deafAvatar);
 });
 
 const keypadMat = new THREE.MeshStandardMaterial({ color: 0xf2c14e, flatShading: true });
@@ -190,6 +232,20 @@ document.getElementById("dropBtn").addEventListener("click", async () => {
   document.getElementById("log").textContent = `Placed a ${selectedShape} at your current spot (${wx.toFixed(1)}, ${wz.toFixed(1)}).`;
 });
 
+// ---------------- Chat from deaf, one-way ----------------
+onValue(roomRef(ROOM, "chatMessage"), snap => {
+  const data = snap.val();
+  if (!data || !data.text) return;
+  document.getElementById("chatFromDeaf").textContent = data.text;
+});
+
+// ---------------- Jump signal (mute's only "reply") ----------------
+let muteJumpT = 0;
+document.getElementById("jumpBtn").addEventListener("click", async () => {
+  muteJumpT = 0.001;
+  await signalJump(ROOM);
+});
+
 // ---------------- Timer ----------------
 const timerEl = document.getElementById("timer");
 let duration = 120, startedAt = null, status = "waiting";
@@ -231,7 +287,18 @@ function endGame(won) {
 
 function animate() {
   const state = rig.update(0.06);
-  duckGroup.position.set(state.pos.x, 0, state.pos.z);
+  duckGroup.position.y = 0;
+  if (muteJumpT > 0) {
+    muteJumpT += 0.04;
+    if (muteJumpT >= 1) {
+      muteJumpT = 0;
+      duckGroup.position.y = 0;
+    } else {
+      duckGroup.position.y = Math.sin(muteJumpT * Math.PI) * 0.8;
+    }
+  }
+  duckGroup.position.x = state.pos.x;
+  duckGroup.position.z = state.pos.z;
   if (rig.isMoving()) duckGroup.rotation.y = state.moveYaw;
   renderer.render(scene, camera);
   requestAnimationFrame(animate);
