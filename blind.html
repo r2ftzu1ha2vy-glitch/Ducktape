@@ -75,13 +75,14 @@
   document.head.appendChild(script);
 </script>
 <script type="module">
-import { roomRef, onValue, get, update, attemptDoor, resolveDoorAttempt } from "./shared/firebase.js";
+import { roomRef, onValue, get, update, attemptDoor, resolveDoorAttempt, authReady } from "./shared/firebase.js";
 import { loadDuck } from "./shared/duck.js";
 
 const params = new URLSearchParams(location.search);
 const ROOM = params.get("room");
 const UID = params.get("uid");
 if (!ROOM) document.getElementById("cueLog").textContent = "No room code in URL — go back to lobby.";
+await authReady;
 
 // ---------------- Scene: black background, white-edge-only rendering ----------------
 const canvas = document.getElementById("cv");
@@ -248,14 +249,16 @@ function checkProximity() {
 // ---------------- Door attempt ----------------
 document.getElementById("tryDoor").addEventListener("click", async () => {
   const guess = filledDigits.join("");
-  await attemptDoor(ROOM, guess);
-  const correct = await resolveDoorAttempt(ROOM);
-  if (correct) {
-    // handled by status listener below
-  } else {
-    const btn = document.getElementById("tryDoor");
-    btn.style.background = "#ff5c5c";
-    setTimeout(() => (btn.style.background = "#fff"), 350);
+  try {
+    await attemptDoor(ROOM, guess);
+    const correct = await resolveDoorAttempt(ROOM);
+    if (!correct) {
+      const btn = document.getElementById("tryDoor");
+      btn.style.background = "#ff5c5c";
+      setTimeout(() => (btn.style.background = "#fff"), 350);
+    }
+  } catch (e) {
+    document.getElementById("cueLog").textContent = e.message;
   }
 });
 
