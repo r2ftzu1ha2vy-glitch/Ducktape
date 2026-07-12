@@ -13,7 +13,7 @@
 // silently falls back to buildPlaceholderDuck(), so the game stays playable.
 // ---------------------------------------------------------------------------
 
-export const DUCK_MODEL_URL = "./assets/duck_baby.glb";
+export const DUCK_MODEL_URL = "./assets/scene.gltf";
 
 export function buildPlaceholderDuck(color) {
   const g = new THREE.Group();
