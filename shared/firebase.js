@@ -93,9 +93,7 @@ function randomToken(len = 24) {
 /** Host creates the room: random door code + random long join token. Returns both. */
 export async function createRoom(code) {
   const doorCode = randomCode();
-  const joinToken = randomToken();
   await set(roomRef(code, "code"), doorCode);
-  await set(roomRef(code, "joinToken"), joinToken);
   await set(roomRef(code, "status"), "waiting");
   await set(roomRef(code, "duration"), 120);
   await set(roomRef(code, "players"), {
@@ -105,7 +103,7 @@ export async function createRoom(code) {
   });
   await set(roomRef(code, "symbols"), { current: null });
   await set(roomRef(code, "doorAttempt"), { guess: "", ts: 0, result: "pending" });
-  return { doorCode, joinToken };
+  return doorCode;
 }
 
 /**
@@ -114,11 +112,7 @@ export async function createRoom(code) {
  * caller can prove they already know joinToken (checked client-side here AND
  * enforced again in the rules, since client checks alone can be bypassed).
  */
-export async function joinAsRole(code, role, uid, joinToken) {
-  const snap = await get(roomRef(code, "joinToken"));
-  if (snap.val() !== joinToken) {
-    throw new Error("Invalid or missing invite token — use the link the host shared, not just the room code.");
-  }
+export async function joinAsRole(code, role, uid) {
   const pRef = roomRef(code, "players", role);
   await set(pRef, { present: true, uid });
   onDisconnect(pRef).set({ present: false, uid });
