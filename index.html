@@ -38,6 +38,8 @@
     padding:10px;border-radius:10px;cursor:pointer;font-size:13px;}
   #status{margin-top:14px;font-size:12px;opacity:.7;min-height:16px;}
   #status.err{color:var(--alert);opacity:1;}
+  #lobbyStatus{margin-top:18px;font-size:14px;text-align:center;min-height:18px;}
+  #startBtn{display:none;background:#7fd9ff;}
   .setup-note{margin-top:22px;font-size:11px;opacity:.5;line-height:1.5;border-top:1px dashed rgba(242,193,78,.3);padding-top:12px;}
 </style>
 </head>
@@ -74,9 +76,8 @@
 
   <button class="go" id="enterBtn" disabled>Enter Room</button>
   <div id="status"></div>
-
-  <div id="lobbyStatus" style="margin-top:18px;font-size:13px;"></div>
-  <button class="go" id="startBtn" style="display:none;background:#7fd9ff;">Start Game (all 3 ready)</button>
+  <div id="lobbyStatus"></div>
+  <button class="go" id="startBtn">Start Game (all 3 ready)</button>
 
   <div class="setup-note">
     First time setup: open <code>shared/firebase.js</code> and paste your own Firebase Realtime Database config (see comments at top of that file). Until then this page will show a connection error.
@@ -85,25 +86,6 @@
 
 <script type="module">
   import { createRoom, joinAsRole, roomRef, onValue, get, startGame, authReady } from "./shared/firebase.js";
-
-  let watchedRoom = null;
-  function watchPresence(code) {
-    if (watchedRoom === code) return;
-    watchedRoom = code;
-    onValue(roomRef(code, "players"), snap => {
-      const p = snap.val() || {};
-      const ready = ["blind", "mute", "deaf"].every(r => p[r] && p[r].present);
-      const lobbyStatus = document.getElementById("lobbyStatus");
-      const startBtn = document.getElementById("startBtn");
-      const roles = ["blind", "mute", "deaf"].map(r => `${r}: ${p[r] && p[r].present ? "✅" : "…waiting"}`);
-      lobbyStatus.textContent = roles.join("  ·  ");
-      startBtn.style.display = ready ? "block" : "none";
-    });
-  }
-
-  document.getElementById("startBtn").addEventListener("click", async () => {
-    await startGame(roomInput.value);
-  });
 
   let selectedRole = null;
   document.querySelectorAll(".role-btn").forEach(btn => {
@@ -131,12 +113,30 @@
     statusEl.className = isErr ? "err" : "";
   }
 
-  let currentJoinToken = null;
+  const ROLE_NAMES = { blind: "Blind", mute: "Mute", deaf: "Deaf" };
+  function waitingMessage(p) {
+    const missing = ["blind", "mute", "deaf"].filter(r => !(p[r] && p[r].present));
+    if (missing.length === 0) return "All three ducks are here! 🎉";
+    if (missing.length === 3) return "Waiting for Blind, Mute, and Deaf";
+    if (missing.length === 2) return `Waiting for ${ROLE_NAMES[missing[0]]} and ${ROLE_NAMES[missing[1]]}`;
+    return `Waiting for ${ROLE_NAMES[missing[0]]}`;
+  }
 
-  // If arriving via an invite link (?room=1234&t=...), pre-fill and skip typing the token.
-  const urlParams = new URLSearchParams(location.search);
-  if (urlParams.get("room")) roomInput.value = urlParams.get("room");
-  if (urlParams.get("t")) currentJoinToken = urlParams.get("t");
+  let watchedRoom = null;
+  function watchPresence(code) {
+    if (watchedRoom === code) return;
+    watchedRoom = code;
+    onValue(roomRef(code, "players"), snap => {
+      const p = snap.val() || {};
+      const ready = ["blind", "mute", "deaf"].every(r => p[r] && p[r].present);
+      document.getElementById("lobbyStatus").textContent = waitingMessage(p);
+      document.getElementById("startBtn").style.display = ready ? "block" : "none";
+    });
+  }
+
+  document.getElementById("startBtn").addEventListener("click", async () => {
+    await startGame(roomInput.value);
+  });
 
   document.getElementById("hostBtn").addEventListener("click", async () => {
     await authReady;
@@ -144,10 +144,8 @@
     roomInput.value = code;
     updateEnterState();
     try {
-      const { joinToken } = await createRoom(code);
-      currentJoinToken = joinToken;
-      const inviteUrl = `${location.origin}${location.pathname}?room=${code}&t=${joinToken}`;
-      setStatus(`Room created. Don't share the room code alone — send this full invite link to the other two players (it's what makes the room guess-proof): ${inviteUrl}`);
+      await createRoom(code);
+      setStatus(`Room ${code} created. Share this code with the other two players.`);
       watchPresence(code);
     } catch (e) {
       setStatus("Couldn't reach Firebase — check shared/firebase.js config. " + e.message, true);
@@ -155,17 +153,14 @@
   });
 
   document.getElementById("joinExistingBtn").addEventListener("click", () => {
-    setStatus("Paste the full invite link the host sent you (not just the 4-digit code) — open it directly, or open this page and it'll pick up the ?room= and ?t= from the URL automatically.");
+    roomInput.focus();
+    setStatus("Enter the 4-digit room code your host shared.");
   });
 
   document.getElementById("enterBtn").addEventListener("click", async () => {
     await authReady;
     const code = roomInput.value;
     if (!selectedRole || code.length !== 4) return;
-    if (!currentJoinToken) {
-      setStatus("Missing invite token — open the full link the host shared, don't just type the room code.", true);
-      return;
-    }
     try {
       const snap = await get(roomRef(code));
       if (!snap.exists()) {
@@ -173,11 +168,11 @@
         return;
       }
       const uid = "duck-" + Math.random().toString(36).slice(2, 8);
-      await joinAsRole(code, selectedRole, uid, currentJoinToken);
+      await joinAsRole(code, selectedRole, uid);
       sessionStorage.setItem("ducktape_uid", uid);
       sessionStorage.setItem("ducktape_room", code);
       watchPresence(code);
-      window.location.href = `./${selectedRole}.html?room=${code}&uid=${uid}&t=${currentJoinToken}`;
+      window.location.href = `./${selectedRole}.html?room=${code}&uid=${uid}`;
     } catch (e) {
       setStatus("Connection error: " + e.message, true);
     }
