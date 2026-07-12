@@ -106,11 +106,6 @@ export async function createRoom(code) {
   return doorCode;
 }
 
-export async function joinAsRole(code, role, uid) {
-  const pRef = roomRef(code, "players", role);
-  await set(pRef, { present: true, uid });
-  onDisconnect(pRef).set({ present: false, uid });
-}
 /**
  * Player joins a role slot. Requires the joinToken that came from the invite
  * link — the DB rules reject writes to /rooms/{code}/players/* unless the
