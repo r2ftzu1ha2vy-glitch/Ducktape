@@ -1,0 +1,320 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Ducktape — Blind Duck</title>
+<style>
+  :root{ --gold:#f2c14e; --alert:#ff5c5c; }
+  *{box-sizing:border-box;}
+  html,body{margin:0;height:100%;background:#000;color:#fff;overflow:hidden;
+    font-family:'Trebuchet MS',ui-rounded,'Segoe UI',sans-serif;}
+  #topbar{position:fixed;top:0;left:0;right:0;height:56px;z-index:20;
+    display:flex;align-items:center;justify-content:space-between;padding:0 16px;
+    background:#000;border-bottom:2px solid #fff;}
+  #timer{font-size:24px;font-weight:800;font-variant-numeric:tabular-nums;}
+  #timer.low{color:var(--alert);}
+  #role{font-weight:700;letter-spacing:1px;font-size:14px;}
+  #stage{position:absolute;top:56px;left:0;right:0;bottom:180px;}
+  canvas{display:block;width:100%;height:100%;}
+  #hud{position:fixed;bottom:0;left:0;right:0;height:180px;background:#000;
+    border-top:2px solid #fff;padding:12px 16px;display:flex;flex-direction:column;gap:8px;z-index:20;}
+  #cueLog{font-size:13px;opacity:.9;min-height:20px;}
+  .digits{display:flex;gap:8px;justify-content:center;}
+  .digit-slot{width:52px;height:60px;border:2px solid #fff;border-radius:8px;
+    display:flex;align-items:center;justify-content:center;font-size:26px;font-weight:800;}
+  .digit-slot.filled{background:#fff;color:#000;}
+  button#tryDoor{margin-top:4px;background:#fff;color:#000;border:none;font-weight:800;
+    padding:12px;border-radius:30px;cursor:pointer;font-size:15px;}
+  button#tryDoor:disabled{opacity:.3;cursor:not-allowed;}
+  button#clearBtn{background:transparent;color:#fff;border:1px solid #fff;border-radius:20px;
+    padding:6px 14px;font-size:12px;cursor:pointer;}
+  .row{display:flex;gap:8px;align-items:center;justify-content:center;}
+  #resultOverlay{position:fixed;inset:0;z-index:50;display:none;align-items:center;justify-content:center;
+    background:rgba(0,0,0,.92);}
+  #resultOverlay .card{border:2px solid #fff;border-radius:14px;padding:36px 40px;text-align:center;max-width:380px;}
+  #resultOverlay button{margin-top:16px;background:#fff;color:#000;border:none;font-weight:800;
+    padding:10px 22px;border-radius:30px;cursor:pointer;}
+</style>
+</head>
+<body>
+<div id="topbar">
+  <div id="role">🕶️ BLIND DUCK</div>
+  <div id="timer">02:00</div>
+</div>
+
+<div id="stage"><canvas id="cv"></canvas></div>
+
+<div id="hud">
+  <div id="cueLog">Walk near a shape to hear its cue. Build the 4-digit code from what you're told.</div>
+  <div class="digits">
+    <div class="digit-slot" id="d0">?</div>
+    <div class="digit-slot" id="d1">?</div>
+    <div class="digit-slot" id="d2">?</div>
+    <div class="digit-slot" id="d3">?</div>
+  </div>
+  <div class="row">
+    <button id="clearBtn">Clear</button>
+    <button id="tryDoor" disabled>Try Door</button>
+  </div>
+</div>
+
+<div id="resultOverlay">
+  <div class="card">
+    <h2 id="resultTitle">Time's Up!</h2>
+    <p id="resultText"></p>
+    <button onclick="location.href='./index.html'">Back to Lobby</button>
+  </div>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script>
+  // GLTFLoader (optional — only needed once you add a real duck GLB)
+  var script = document.createElement('script');
+  script.src = "https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/examples/js/loaders/GLTFLoader.js";
+  document.head.appendChild(script);
+</script>
+<script type="module">
+import { roomRef, onValue, get, update, attemptDoor, resolveDoorAttempt } from "./shared/firebase.js";
+import { loadDuck } from "./shared/duck.js";
+
+const params = new URLSearchParams(location.search);
+const ROOM = params.get("room");
+const UID = params.get("uid");
+if (!ROOM) document.getElementById("cueLog").textContent = "No room code in URL — go back to lobby.";
+
+// ---------------- Scene: black background, white-edge-only rendering ----------------
+const canvas = document.getElementById("cv");
+const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
+renderer.setClearColor(0x000000, 1);
+renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+const scene = new THREE.Scene();
+const camera = new THREE.PerspectiveCamera(55, 1, 0.1, 100);
+camera.position.set(0, 4, 6);
+camera.lookAt(0, 0, 0);
+
+// Every object in the blind duck's world is rendered as a plain black fill mesh
+// PLUS a white wireframe/edges overlay, so they only ever perceive silhouettes.
+const BLACK_FILL = new THREE.MeshBasicMaterial({ color: 0x000000 });
+function addEdged(geometry, position) {
+  const fillMesh = new THREE.Mesh(geometry, BLACK_FILL);
+  fillMesh.position.copy(position);
+  scene.add(fillMesh);
+  const edges = new THREE.EdgesGeometry(geometry);
+  const line = new THREE.LineSegments(edges, new THREE.LineBasicMaterial({ color: 0xffffff }));
+  line.position.copy(position);
+  scene.add(line);
+  return fillMesh;
+}
+
+// Room floor + walls as blocky low-poly shapes (outlines only, per design)
+addEdged(new THREE.BoxGeometry(10, 0.2, 10), new THREE.Vector3(0, -0.5, 0));
+addEdged(new THREE.BoxGeometry(10, 3, 0.2), new THREE.Vector3(0, 1, -5));
+addEdged(new THREE.BoxGeometry(0.2, 3, 10), new THREE.Vector3(-5, 1, 0));
+addEdged(new THREE.BoxGeometry(0.2, 3, 10), new THREE.Vector3(5, 1, 0));
+
+// The duck itself — still just an outlined silhouette in this world.
+let duckGroup = new THREE.Group();
+scene.add(duckGroup);
+loadDuck(0xffffff, ({ group }) => {
+  scene.remove(duckGroup);
+  duckGroup = group;
+  // Force everything in the real/placeholder model to render as outline-only too.
+  duckGroup.traverse(o => {
+    if (o.isMesh) {
+      const edges = new THREE.EdgesGeometry(o.geometry);
+      const line = new THREE.LineSegments(edges, new THREE.LineBasicMaterial({ color: 0xffffff }));
+      o.add(line);
+      o.material = BLACK_FILL;
+    }
+  });
+  scene.add(duckGroup);
+});
+
+function resize() {
+  const r = canvas.getBoundingClientRect();
+  renderer.setSize(r.width, r.height, false);
+  camera.aspect = r.width / r.height;
+  camera.updateProjectionMatrix();
+}
+window.addEventListener("resize", resize);
+resize();
+
+// Duck position the player can move with arrow keys / on-screen drag (simple demo control)
+const duckPos = new THREE.Vector3(0, 0, 2);
+const keys = {};
+window.addEventListener("keydown", e => keys[e.key] = true);
+window.addEventListener("keyup", e => keys[e.key] = false);
+
+// ---------------- Symbol markers placed by the deaf player ----------------
+// Each symbol has a shape + world position; when the blind duck's position
+// gets close enough, we treat it as "walked into" and play a distinct sound cue.
+const activeSymbols = new Map(); // key -> {mesh, shape, worldX, worldZ, triggered}
+
+const SHAPE_TONES = {
+  circle:   523.25, // C5
+  triangle: 659.25, // E5
+  square:   783.99, // G5
+  zigzag:   987.77, // B5
+};
+
+let audioCtx = null;
+function playTone(freq) {
+  audioCtx = audioCtx || new (window.AudioContext || window.webkitAudioContext)();
+  const osc = audioCtx.createOscillator();
+  const gain = audioCtx.createGain();
+  osc.frequency.value = freq;
+  osc.type = "sine";
+  gain.gain.setValueAtTime(0.25, audioCtx.currentTime);
+  gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + 0.6);
+  osc.connect(gain).connect(audioCtx.destination);
+  osc.start();
+  osc.stop(audioCtx.currentTime + 0.6);
+}
+
+function makeSymbolMesh(shape) {
+  let geo;
+  if (shape === "circle") geo = new THREE.TorusGeometry(0.4, 0.08, 6, 12);
+  else if (shape === "triangle") geo = new THREE.ConeGeometry(0.45, 0.3, 3);
+  else if (shape === "square") geo = new THREE.BoxGeometry(0.6, 0.6, 0.1);
+  else geo = new THREE.TorusKnotGeometry(0.3, 0.06, 32, 4); // zigzag stand-in
+  const fill = new THREE.Mesh(geo, BLACK_FILL);
+  const edges = new THREE.EdgesGeometry(geo);
+  const line = new THREE.LineSegments(edges, new THREE.LineBasicMaterial({ color: 0xffffff }));
+  fill.add(line);
+  return fill;
+}
+
+function syncSymbol(data) {
+  if (!data) return;
+  const key = data.ts;
+  if (activeSymbols.has(key)) return;
+  const mesh = makeSymbolMesh(data.shape);
+  mesh.position.set(data.worldX, 0.4, data.worldZ);
+  scene.add(mesh);
+  activeSymbols.set(key, { mesh, shape: data.shape, worldX: data.worldX, worldZ: data.worldZ, triggered: false });
+  document.getElementById("cueLog").textContent = "A new shape appeared somewhere in the room — walk around to find it.";
+}
+
+onValue(roomRef(ROOM, "symbols", "current"), snap => syncSymbol(snap.val()));
+
+// ---------------- Digit slots filled by walking into symbols ----------------
+// Mapping from shape -> which digit slot / value is decided by the deaf+mute
+// duo out-of-band (their gesture relay). Here, each tone the blind duck hears
+// also shows a shape-to-slot legend so they know to ask "what does circle mean?"
+// Practically: proximity triggers a tone AND advances the next empty digit slot
+// with a value derived from the shape, giving the group something concrete to
+// coordinate around without giving the blind player any visual info.
+const SHAPE_DIGIT_HINT = { circle: 1, triangle: 3, square: 7, zigzag: 9 }; // placeholder mapping for demo
+let filledDigits = [null, null, null, null];
+
+function nextEmptySlot() {
+  return filledDigits.findIndex(d => d === null);
+}
+
+function renderDigits() {
+  filledDigits.forEach((d, i) => {
+    const el = document.getElementById("d" + i);
+    el.textContent = d === null ? "?" : d;
+    el.classList.toggle("filled", d !== null);
+  });
+  document.getElementById("tryDoor").disabled = filledDigits.some(d => d === null);
+}
+document.getElementById("clearBtn").addEventListener("click", () => {
+  filledDigits = [null, null, null, null];
+  renderDigits();
+});
+
+function checkProximity() {
+  for (const [key, sym] of activeSymbols) {
+    if (sym.triggered) continue;
+    const dx = duckPos.x - sym.worldX;
+    const dz = duckPos.z - sym.worldZ;
+    const dist = Math.sqrt(dx * dx + dz * dz);
+    if (dist < 0.8) {
+      sym.triggered = true;
+      playTone(SHAPE_TONES[sym.shape]);
+      const slot = nextEmptySlot();
+      if (slot !== -1) {
+        filledDigits[slot] = SHAPE_DIGIT_HINT[sym.shape];
+        renderDigits();
+      }
+      document.getElementById("cueLog").textContent =
+        `Heard a tone (${sym.shape}) — a digit was placed. Confirm with your team which digit this really is.`;
+    }
+  }
+}
+
+// ---------------- Door attempt ----------------
+document.getElementById("tryDoor").addEventListener("click", async () => {
+  const guess = filledDigits.join("");
+  await attemptDoor(ROOM, guess);
+  const correct = await resolveDoorAttempt(ROOM);
+  if (correct) {
+    // handled by status listener below
+  } else {
+    const btn = document.getElementById("tryDoor");
+    btn.style.background = "#ff5c5c";
+    setTimeout(() => (btn.style.background = "#fff"), 350);
+  }
+});
+
+// ---------------- Timer (host writes startedAt; every client derives remaining time) ----------------
+const timerEl = document.getElementById("timer");
+let duration = 120, startedAt = null, status = "waiting";
+
+onValue(roomRef(ROOM), snap => {
+  const data = snap.val();
+  if (!data) return;
+  duration = data.duration || 120;
+  startedAt = data.startedAt || null;
+  status = data.status || "waiting";
+  if (status === "won") endGame(true);
+  if (status === "lost") endGame(false);
+});
+
+setInterval(() => {
+  if (!startedAt || status !== "playing") return;
+  const elapsed = Math.floor((Date.now() - startedAt) / 1000);
+  const left = Math.max(duration - elapsed, 0);
+  timerEl.textContent = fmt(left);
+  timerEl.classList.toggle("low", left <= 20);
+  if (left <= 0 && status === "playing") {
+    update(roomRef(ROOM), { status: "lost" });
+  }
+}, 250);
+
+function fmt(s) {
+  const m = Math.floor(s / 60), sec = s % 60;
+  return String(m).padStart(2, "0") + ":" + String(sec).padStart(2, "0");
+}
+
+function endGame(won) {
+  const overlay = document.getElementById("resultOverlay");
+  overlay.style.display = "flex";
+  document.getElementById("resultTitle").textContent = won ? "Room Cleared! 🎉" : "Time's Up!";
+  document.getElementById("resultText").textContent = won
+    ? "The door opened. Great teamwork."
+    : "The door stayed shut. Coordinate faster next time.";
+}
+
+// ---------------- Movement + render loop ----------------
+function animate() {
+  const speed = 0.06;
+  if (keys["ArrowUp"] || keys["w"]) duckPos.z -= speed;
+  if (keys["ArrowDown"] || keys["s"]) duckPos.z += speed;
+  if (keys["ArrowLeft"] || keys["a"]) duckPos.x -= speed;
+  if (keys["ArrowRight"] || keys["d"]) duckPos.x += speed;
+  duckPos.x = THREE.MathUtils.clamp(duckPos.x, -4.5, 4.5);
+  duckPos.z = THREE.MathUtils.clamp(duckPos.z, -4.5, 4.5);
+  duckGroup.position.set(duckPos.x, 0, duckPos.z);
+  camera.position.set(duckPos.x, 4, duckPos.z + 5);
+  camera.lookAt(duckPos.x, 0, duckPos.z);
+  checkProximity();
+  renderer.render(scene, camera);
+  requestAnimationFrame(animate);
+}
+animate();
+</script>
+</body>
+</html>

@@ -1,0 +1,154 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Ducktape — Mute Duck</title>
+<style>
+  :root{ --ink:#1b2a2f; --paper:#eef6f3; --pond:#0f5c6b; --pond-deep:#0a3f49; --gold:#f2c14e; --alert:#ff5c5c; }
+  *{box-sizing:border-box;}
+  html,body{margin:0;height:100%;background:linear-gradient(180deg,#163b3f,#0a1c1f);
+    color:var(--paper);font-family:'Trebuchet MS',ui-rounded,'Segoe UI',sans-serif;overflow:hidden;}
+  #topbar{position:fixed;top:0;left:0;right:0;height:56px;z-index:20;
+    display:flex;align-items:center;justify-content:space-between;padding:0 16px;
+    background:var(--pond-deep);border-bottom:2px solid var(--gold);}
+  #timer{font-size:24px;font-weight:800;font-variant-numeric:tabular-nums;}
+  #timer.low{color:var(--alert);}
+  #role{font-weight:700;letter-spacing:1px;font-size:14px;}
+  #wrap{position:absolute;top:56px;left:0;right:0;bottom:0;padding:20px;overflow:auto;}
+  .code-card{font-family:'Courier New',monospace;font-size:44px;letter-spacing:14px;
+    background:#0a1c1f;border:2px dashed var(--gold);border-radius:14px;
+    padding:22px;text-align:center;color:var(--gold);margin-bottom:8px;}
+  .note{font-size:12px;opacity:.65;text-align:center;margin-bottom:22px;}
+  h4{font-size:12px;text-transform:uppercase;letter-spacing:1.5px;opacity:.65;margin:18px 0 8px;}
+  .shape-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;}
+  .shape-tile{background:#0a1c1f;border:2px solid rgba(242,193,78,.35);border-radius:14px;
+    aspect-ratio:1;display:flex;flex-direction:column;align-items:center;justify-content:center;
+    gap:6px;cursor:pointer;user-select:none;transition:.15s;}
+  .shape-tile:hover{transform:translateY(-2px);border-color:var(--gold);}
+  .shape-tile.active{background:var(--gold);color:var(--ink);}
+  .shape-tile .icon{font-size:30px;}
+  .shape-tile .label{font-size:11px;font-weight:700;}
+  #placeRow{display:flex;gap:10px;margin-top:16px;align-items:center;}
+  #placeRow label{font-size:12px;opacity:.7;}
+  input[type=range]{flex:1;}
+  button#dropBtn{background:var(--gold);color:var(--ink);border:none;font-weight:800;
+    padding:12px 20px;border-radius:30px;cursor:pointer;font-size:14px;margin-top:14px;width:100%;}
+  #log{margin-top:16px;font-size:12px;opacity:.6;min-height:16px;}
+  #resultOverlay{position:fixed;inset:0;z-index:50;display:none;align-items:center;justify-content:center;
+    background:rgba(5,10,11,.9);}
+  #resultOverlay .card{background:linear-gradient(180deg,#123338,#0a1c1f);border:2px solid var(--gold);
+    border-radius:18px;padding:36px 40px;text-align:center;max-width:380px;}
+  #resultOverlay button{margin-top:16px;background:var(--gold);color:var(--ink);border:none;
+    font-weight:800;padding:10px 22px;border-radius:30px;cursor:pointer;}
+</style>
+</head>
+<body>
+<div id="topbar">
+  <div id="role">🤐 MUTE DUCK</div>
+  <div id="timer">02:00</div>
+</div>
+
+<div id="wrap">
+  <h4>The door code (only you can see this)</h4>
+  <div class="code-card" id="codeCard">••••</div>
+  <div class="note">You cannot speak or type to your team. Place shape-symbols in the room to signal digits — the deaf duck will see where you place them, and the blind duck hears a tone when they walk into one.</div>
+
+  <h4>Pick a shape for the current digit</h4>
+  <div class="shape-grid" id="shapeGrid">
+    <div class="shape-tile" data-shape="circle"><div class="icon">⭕</div><div class="label">Circle</div></div>
+    <div class="shape-tile" data-shape="triangle"><div class="icon">🔺</div><div class="label">Triangle</div></div>
+    <div class="shape-tile" data-shape="square"><div class="icon">⬛</div><div class="label">Square</div></div>
+    <div class="shape-tile" data-shape="zigzag"><div class="icon">⚡</div><div class="label">Zigzag</div></div>
+  </div>
+
+  <div id="placeRow">
+    <label>Room X</label>
+    <input type="range" id="wx" min="-4.5" max="4.5" step="0.1" value="0">
+    <label>Room Z</label>
+    <input type="range" id="wz" min="-4.5" max="4.5" step="0.1" value="0">
+  </div>
+  <button id="dropBtn" disabled>Place Symbol in Room</button>
+  <div id="log">Select a shape, drag the sliders to choose where in the room to drop it, then place.</div>
+</div>
+
+<div id="resultOverlay">
+  <div class="card">
+    <h2 id="resultTitle">Time's Up!</h2>
+    <p id="resultText"></p>
+    <button onclick="location.href='./index.html'">Back to Lobby</button>
+  </div>
+</div>
+
+<script type="module">
+import { roomRef, onValue, update, broadcastSymbol } from "./shared/firebase.js";
+
+const params = new URLSearchParams(location.search);
+const ROOM = params.get("room");
+if (!ROOM) document.getElementById("log").textContent = "No room code in URL — go back to lobby.";
+
+// Reveal the real randomized code to this client only.
+onValue(roomRef(ROOM, "code"), snap => {
+  const code = snap.val();
+  if (code) document.getElementById("codeCard").textContent = code.split("").join(" ");
+});
+
+let selectedShape = null;
+document.querySelectorAll(".shape-tile").forEach(tile => {
+  tile.addEventListener("click", () => {
+    document.querySelectorAll(".shape-tile").forEach(t => t.classList.remove("active"));
+    tile.classList.add("active");
+    selectedShape = tile.dataset.shape;
+    document.getElementById("dropBtn").disabled = false;
+  });
+});
+
+document.getElementById("dropBtn").addEventListener("click", async () => {
+  if (!selectedShape) return;
+  const wx = parseFloat(document.getElementById("wx").value);
+  const wz = parseFloat(document.getElementById("wz").value);
+  await broadcastSymbol(ROOM, selectedShape, wx, wz);
+  document.getElementById("log").textContent = `Placed a ${selectedShape} at (${wx.toFixed(1)}, ${wz.toFixed(1)}). Watch for the deaf duck to relay it.`;
+});
+
+// ---------------- Timer ----------------
+const timerEl = document.getElementById("timer");
+let duration = 120, startedAt = null, status = "waiting";
+
+onValue(roomRef(ROOM), snap => {
+  const data = snap.val();
+  if (!data) return;
+  duration = data.duration || 120;
+  startedAt = data.startedAt || null;
+  status = data.status || "waiting";
+  if (status === "won") endGame(true);
+  if (status === "lost") endGame(false);
+});
+
+setInterval(() => {
+  if (!startedAt || status !== "playing") return;
+  const elapsed = Math.floor((Date.now() - startedAt) / 1000);
+  const left = Math.max(duration - elapsed, 0);
+  timerEl.textContent = fmt(left);
+  timerEl.classList.toggle("low", left <= 20);
+  if (left <= 0 && status === "playing") {
+    update(roomRef(ROOM), { status: "lost" });
+  }
+}, 250);
+
+function fmt(s) {
+  const m = Math.floor(s / 60), sec = s % 60;
+  return String(m).padStart(2, "0") + ":" + String(sec).padStart(2, "0");
+}
+
+function endGame(won) {
+  const overlay = document.getElementById("resultOverlay");
+  overlay.style.display = "flex";
+  document.getElementById("resultTitle").textContent = won ? "Room Cleared! 🎉" : "Time's Up!";
+  document.getElementById("resultText").textContent = won
+    ? "The door opened. Great teamwork."
+    : "The door stayed shut. Coordinate faster next time.";
+}
+</script>
+</body>
+</html>

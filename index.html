@@ -1,0 +1,173 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Ducktape — Join Room</title>
+<style>
+  :root{
+    --ink:#1b2a2f; --paper:#eef6f3; --pond:#0f5c6b; --pond-deep:#0a3f49;
+    --gold:#f2c14e; --alert:#ff5c5c;
+  }
+  *{box-sizing:border-box;}
+  html,body{margin:0;min-height:100%;background:radial-gradient(ellipse at 50% -10%, #163b3f, #0a1c1f 60%);
+    font-family:'Trebuchet MS',ui-rounded,'Segoe UI',sans-serif;color:var(--paper);
+    display:flex;align-items:center;justify-content:center;padding:20px;}
+  .card{width:100%;max-width:420px;background:linear-gradient(180deg,#123338,#0a1c1f);
+    border:2px solid var(--gold);border-radius:18px;padding:32px 28px;}
+  h1{margin:0 0 4px;font-size:26px;display:flex;align-items:center;gap:8px;}
+  h1 span.tape{background:var(--gold);color:var(--ink);padding:1px 8px;border-radius:3px;
+    transform:rotate(-3deg);display:inline-block;font-size:13px;}
+  p.sub{opacity:.7;margin:0 0 22px;font-size:14px;}
+  label{display:block;font-size:12px;text-transform:uppercase;letter-spacing:1.5px;opacity:.65;margin:16px 0 6px;}
+  input[type=text]{width:100%;padding:12px 14px;border-radius:10px;border:1px solid rgba(242,193,78,.5);
+    background:#0a1c1f;color:var(--paper);font-size:18px;letter-spacing:2px;text-align:center;}
+  .roles{display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;margin-top:8px;}
+  .role-btn{background:#0a1c1f;border:2px solid rgba(242,193,78,.35);border-radius:12px;
+    padding:14px 8px;text-align:center;cursor:pointer;transition:.15s;}
+  .role-btn:hover{border-color:var(--gold);transform:translateY(-2px);}
+  .role-btn.selected{background:var(--gold);color:var(--ink);border-color:var(--gold);}
+  .role-btn .emoji{font-size:26px;display:block;margin-bottom:6px;}
+  .role-btn .name{font-weight:700;font-size:13px;}
+  .role-btn .desc{font-size:10px;opacity:.7;margin-top:2px;}
+  button.go{width:100%;margin-top:24px;background:var(--gold);color:var(--ink);border:none;
+    font-weight:800;padding:14px;border-radius:30px;cursor:pointer;font-size:16px;}
+  button.go:disabled{opacity:.4;cursor:not-allowed;}
+  .hostrow{display:flex;gap:10px;margin-top:10px;}
+  .hostrow button{flex:1;background:#123338;color:var(--paper);border:1px solid rgba(242,193,78,.35);
+    padding:10px;border-radius:10px;cursor:pointer;font-size:13px;}
+  #status{margin-top:14px;font-size:12px;opacity:.7;min-height:16px;}
+  #status.err{color:var(--alert);opacity:1;}
+  .setup-note{margin-top:22px;font-size:11px;opacity:.5;line-height:1.5;border-top:1px dashed rgba(242,193,78,.3);padding-top:12px;}
+</style>
+</head>
+<body>
+<div class="card">
+  <h1>🦆 Ducktape <span class="tape">JOIN</span></h1>
+  <p class="sub">Each of the 3 players opens this page on their own device.</p>
+
+  <label>Room code</label>
+  <input type="text" id="roomCode" maxlength="4" placeholder="e.g. 4821" autocomplete="off">
+  <div class="hostrow">
+    <button id="hostBtn">Host new room</button>
+    <button id="joinExistingBtn">I have a code</button>
+  </div>
+
+  <label style="margin-top:22px;">Choose your role</label>
+  <div class="roles" id="roles">
+    <div class="role-btn" data-role="blind">
+      <span class="emoji">🕶️</span>
+      <div class="name">Blind Duck</div>
+      <div class="desc">has the door</div>
+    </div>
+    <div class="role-btn" data-role="mute">
+      <span class="emoji">🤐</span>
+      <div class="name">Mute Duck</div>
+      <div class="desc">has the code</div>
+    </div>
+    <div class="role-btn" data-role="deaf">
+      <span class="emoji">🙉</span>
+      <div class="name">Deaf Duck</div>
+      <div class="desc">has the eyes</div>
+    </div>
+  </div>
+
+  <button class="go" id="enterBtn" disabled>Enter Room</button>
+  <div id="status"></div>
+
+  <div id="lobbyStatus" style="margin-top:18px;font-size:13px;"></div>
+  <button class="go" id="startBtn" style="display:none;background:#7fd9ff;">Start Game (all 3 ready)</button>
+
+  <div class="setup-note">
+    First time setup: open <code>shared/firebase.js</code> and paste your own Firebase Realtime Database config (see comments at top of that file). Until then this page will show a connection error.
+  </div>
+</div>
+
+<script type="module">
+  import { createRoom, joinAsRole, roomRef, onValue, get, startGame } from "./shared/firebase.js";
+
+  let watchedRoom = null;
+  function watchPresence(code) {
+    if (watchedRoom === code) return;
+    watchedRoom = code;
+    onValue(roomRef(code, "players"), snap => {
+      const p = snap.val() || {};
+      const ready = ["blind", "mute", "deaf"].every(r => p[r] && p[r].present);
+      const lobbyStatus = document.getElementById("lobbyStatus");
+      const startBtn = document.getElementById("startBtn");
+      const roles = ["blind", "mute", "deaf"].map(r => `${r}: ${p[r] && p[r].present ? "✅" : "…waiting"}`);
+      lobbyStatus.textContent = roles.join("  ·  ");
+      startBtn.style.display = ready ? "block" : "none";
+    });
+  }
+
+  document.getElementById("startBtn").addEventListener("click", async () => {
+    await startGame(roomInput.value);
+  });
+
+  let selectedRole = null;
+  document.querySelectorAll(".role-btn").forEach(btn => {
+    btn.addEventListener("click", () => {
+      document.querySelectorAll(".role-btn").forEach(b => b.classList.remove("selected"));
+      btn.classList.add("selected");
+      selectedRole = btn.dataset.role;
+      updateEnterState();
+    });
+  });
+
+  const roomInput = document.getElementById("roomCode");
+  roomInput.addEventListener("input", () => {
+    roomInput.value = roomInput.value.replace(/[^0-9]/g, "");
+    updateEnterState();
+  });
+
+  function updateEnterState() {
+    document.getElementById("enterBtn").disabled = !(selectedRole && roomInput.value.length === 4);
+  }
+
+  const statusEl = document.getElementById("status");
+  function setStatus(msg, isErr = false) {
+    statusEl.textContent = msg;
+    statusEl.className = isErr ? "err" : "";
+  }
+
+  document.getElementById("hostBtn").addEventListener("click", async () => {
+    const code = String(Math.floor(1000 + Math.random() * 9000));
+    roomInput.value = code;
+    updateEnterState();
+    try {
+      const doorCode = await createRoom(code);
+      setStatus(`Room ${code} created. Share this code with the other two players. (Door code randomized: hidden from host, only the mute player's client will reveal it.)`);
+      watchPresence(code);
+    } catch (e) {
+      setStatus("Couldn't reach Firebase — check shared/firebase.js config. " + e.message, true);
+    }
+  });
+
+  document.getElementById("joinExistingBtn").addEventListener("click", () => {
+    roomInput.focus();
+    setStatus("Enter the 4-digit room code your host shared.");
+  });
+
+  document.getElementById("enterBtn").addEventListener("click", async () => {
+    const code = roomInput.value;
+    if (!selectedRole || code.length !== 4) return;
+    try {
+      const snap = await get(roomRef(code));
+      if (!snap.exists()) {
+        setStatus("No room found with that code. Ask the host to create it first.", true);
+        return;
+      }
+      const uid = "duck-" + Math.random().toString(36).slice(2, 8);
+      await joinAsRole(code, selectedRole, uid);
+      sessionStorage.setItem("ducktape_uid", uid);
+      sessionStorage.setItem("ducktape_room", code);
+      watchPresence(code);
+      window.location.href = `./${selectedRole}.html?room=${code}&uid=${uid}`;
+    } catch (e) {
+      setStatus("Connection error: " + e.message, true);
+    }
+  });
+</script>
+</body>
+</html>
