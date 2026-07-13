@@ -171,8 +171,23 @@
       await joinAsRole(code, selectedRole, uid);
       sessionStorage.setItem("ducktape_uid", uid);
       sessionStorage.setItem("ducktape_room", code);
+      setStatus(`Joined as ${ROLE_NAMES[selectedRole]}. Waiting for the other ducks…`);
+
+      // Lock in role/code so a second click can't join twice under a new uid.
+      document.getElementById("enterBtn").disabled = true;
+      document.getElementById("hostBtn").disabled = true;
+      document.getElementById("joinExistingBtn").disabled = true;
+      roomInput.disabled = true;
+      document.querySelectorAll(".role-btn").forEach(b => b.style.pointerEvents = "none");
+
       watchPresence(code);
-      window.location.href = `./${selectedRole}.html?room=${code}&uid=${uid}`;
+      // Everyone waits here — once any player hits Start, all three get
+      // pushed to their role page together instead of racing ahead solo.
+      onValue(roomRef(code, "status"), snap => {
+        if (snap.val() === "playing") {
+          window.location.href = `./${selectedRole}.html?room=${code}&uid=${uid}`;
+        }
+      });
     } catch (e) {
       setStatus("Connection error: " + e.message, true);
     }
