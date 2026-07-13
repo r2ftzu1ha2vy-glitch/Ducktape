@@ -74,12 +74,7 @@
 </div>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
-<script>
-  // GLTFLoader (optional — only needed once you add a real duck GLB)
-  var script = document.createElement('script');
-  script.src = "https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/examples/js/loaders/GLTFLoader.js";
-  document.head.appendChild(script);
-</script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/examples/js/loaders/GLTFLoader.js"></script>
 <script type="module">
 import { roomRef, onValue, get, update, attemptDoor, resolveDoorAttempt, authReady } from "./shared/firebase.js";
 import { loadDuck } from "./shared/duck.js";
@@ -133,10 +128,13 @@ for (let r = 0; r < 3; r++) {
 
 // The duck itself — still just an outlined silhouette in this world.
 let duckGroup = new THREE.Group();
+let duckMixer = null, duckSetMoving = () => {};
 scene.add(duckGroup);
-loadDuck(0xffffff, ({ group }) => {
+loadDuck(0xffffff, ({ group, mixer, setMoving }) => {
   scene.remove(duckGroup);
   duckGroup = group;
+  duckMixer = mixer;
+  duckSetMoving = setMoving;
   // Force everything in the real/placeholder model to render as outline-only too.
   duckGroup.traverse(o => {
     if (o.isMesh) {
@@ -332,10 +330,14 @@ function endGame(won) {
 }
 
 // ---------------- Movement + render loop ----------------
+const clock = new THREE.Clock();
 function animate() {
+  const delta = clock.getDelta();
   const state = rig.update(0.06);
   duckGroup.position.set(state.pos.x, 0, state.pos.z);
   if (rig.isMoving()) duckGroup.rotation.y = state.moveYaw;
+  duckSetMoving(rig.isMoving());
+  if (duckMixer) duckMixer.update(delta);
   checkProximity();
   renderer.render(scene, camera);
   requestAnimationFrame(animate);
