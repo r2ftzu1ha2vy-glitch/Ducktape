@@ -74,22 +74,16 @@ export function roomRef(code, ...path) {
 
 /**
  * Room CODE is what you tell friends verbally — keep it short (4 digits) for
- * convenience, that's fine, since it's not the security boundary anymore.
- * The actual guess-proofing comes from JOIN_TOKEN: a long random string
- * generated at room creation and shared via the invite link (?room=1234&t=...),
- * never typed by hand and never brute-forceable in a reasonable time.
- * The DB rules (see README) require the token to match before any write
- * to a room succeeds, so scripts hitting the REST API with just a guessed
- * 4-digit code get rejected.
+ * convenience. Note this is NOT a security boundary: with the wide-open test
+ * mode rules described in README.md (`.read: true, .write: true`), anyone who
+ * knows or guesses a 4-digit code can read/write that room directly via the
+ * REST API. That's fine for a same-room prototype demo, but before any real
+ * deployment you'd want proper Realtime Database rules (e.g. scoped to the
+ * signed-in uid that's already in players/{role}) rather than a bare 4-digit
+ * code as the only gate.
  */
 export function randomCode() {
   return String(Math.floor(Math.random() * 10000)).padStart(4, "0");
-}
-
-function randomToken(len = 24) {
-  const bytes = new Uint8Array(len);
-  crypto.getRandomValues(bytes);
-  return Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join("");
 }
 
 /** Host creates the room: random door code + random long join token. Returns both. */
@@ -111,10 +105,10 @@ export async function createRoom(code) {
 }
 
 /**
- * Player joins a role slot. Requires the joinToken that came from the invite
- * link — the DB rules reject writes to /rooms/{code}/players/* unless the
- * caller can prove they already know joinToken (checked client-side here AND
- * enforced again in the rules, since client checks alone can be bypassed).
+ * Player joins a role slot. Sets players/{role} to present with this
+ * client's anonymous uid, and arms an onDisconnect handler so the lobby
+ * (and other players) see the role flip back to absent if this client
+ * closes the tab or loses connection mid-game.
  */
 export async function joinAsRole(code, role, uid) {
   const pRef = roomRef(code, "players", role);
