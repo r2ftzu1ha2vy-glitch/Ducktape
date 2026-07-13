@@ -160,10 +160,12 @@ deafRoomBackWall.position.set(-9.5, 1, 0);
 scene.add(deafRoomBackWall);
 
 let deafAvatar = new THREE.Group();
+let deafAvatarMixer = null;
 scene.add(deafAvatar);
-loadDuck(0x7fd9ff, ({ group }) => {
+loadDuck(0x7fd9ff, ({ group, mixer }) => {
   scene.remove(deafAvatar);
   deafAvatar = group;
+  deafAvatarMixer = mixer;
   deafAvatar.position.set(-7.5, 0, 0);
   scene.add(deafAvatar);
 });
@@ -174,10 +176,13 @@ keypad.position.set(0, 1.1, -4.85);
 scene.add(keypad);
 
 let duckGroup = new THREE.Group();
+let duckMixer = null, duckSetMoving = () => {};
 scene.add(duckGroup);
-loadDuck(0xffcf4a, ({ group }) => {
+loadDuck(0xffcf4a, ({ group, mixer, setMoving }) => {
   scene.remove(duckGroup);
   duckGroup = group;
+  duckMixer = mixer;
+  duckSetMoving = setMoving;
   duckGroup.position.set(0, 0, 2);
   scene.add(duckGroup);
   hideFromOwnCamera(camera, duckGroup);
@@ -285,7 +290,9 @@ function endGame(won) {
     : "The door stayed shut. Coordinate faster next time.";
 }
 
+const clock = new THREE.Clock();
 function animate() {
+  const delta = clock.getDelta();
   const state = rig.update(0.06);
   duckGroup.position.y = 0;
   if (muteJumpT > 0) {
@@ -300,6 +307,9 @@ function animate() {
   duckGroup.position.x = state.pos.x;
   duckGroup.position.z = state.pos.z;
   if (rig.isMoving()) duckGroup.rotation.y = state.moveYaw;
+  duckSetMoving(rig.isMoving());
+  if (duckMixer) duckMixer.update(delta);
+  if (deafAvatarMixer) deafAvatarMixer.update(delta);
   renderer.render(scene, camera);
   requestAnimationFrame(animate);
 }
