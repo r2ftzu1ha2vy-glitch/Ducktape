@@ -3,11 +3,18 @@
 // - Camera sits at the duck's eye height, at duckPos.
 // - Drag (mouse or touch) rotates look direction (yaw + pitch).
 // - WASD/arrows move relative to look yaw.
-// - The duck's own body model is added to the scene (other players can see it)
-//   but is EXCLUDED from this client's own camera via layers, so you never
-//   see your own body — first person.
-// - The duck model's yaw is set to match movement heading, so from other
-//   players' viewpoints the duck visibly turns toward the direction it walks.
+// - Each client renders its own independent Three.js scene — player positions
+//   are NOT synced live over the network (only discrete events are: symbols,
+//   chat, the door attempt, and the mute-jump signal). The other two ducks
+//   you see are static decorative avatars standing in a window opening, not
+//   a live feed of that teammate's actual movement.
+// - hideFromOwnCamera still matters within a single client: it adds your own
+//   duck's body model to the scene (so its silhouette/edges are available for
+//   other code, e.g. blind.html's outline pass) but excludes it from your own
+//   camera's render, so you don't see your own body blocking the first-person
+//   view.
+// - The duck model's yaw is set to match movement heading, so it visibly
+//   turns to face the direction it's walking.
 // ---------------------------------------------------------------------------
 
 export function createFirstPersonRig(camera, domElement, { bounds = 4.5 } = {}) {
