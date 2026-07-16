@@ -9,7 +9,7 @@
 // playable either way.
 // ---------------------------------------------------------------------------
 
-export const DUCK_MODEL_URL = "./assets/scene.gltf";
+export const DUCK_MODEL_URL = "./assets/duck_baby_-_animated_low_poly.glb";
 
 // Name of the clip to loop while the duck stands still / walks. Falls back to
 // whatever clip index 0 happens to be if these names aren't present in the file.
