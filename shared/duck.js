@@ -99,10 +99,10 @@ export function loadDuck(color, onReady) {
       onReady({ group, mixer, actions, setMoving });
     },
     undefined,
-    () => {
-      // 404 or parse failure — fall back silently so the prototype keeps working.
-      onReady(withNoopAnimation(buildPlaceholderDuck(color)));
-    }
+    (err) => {
+  console.error("Failed to load duck model:", err);
+  onReady(withNoopAnimation(buildPlaceholderDuck(color)));
+}
   );
 }
 
